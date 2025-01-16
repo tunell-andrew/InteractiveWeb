@@ -12,27 +12,60 @@
         canvas {
             display: block;
             background: #87CEEB;
+            width: 100vw;
+            height: 100vh;
         }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <canvas id="gameCanvas"></canvas>
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
+        // Function to resize the canvas to fill browser window dynamically
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        //EDITED 
+
+
+        // Initial canvas size
+        resizeCanvas();
+
+        // Resize canvas when the window is resized
+        window.addEventListener('resize', resizeCanvas);
+
         // Game variables
-        let player = { x: 500, y: 500, width: 30, height: 30, speed: 5, dx: 0, dy: 0, onGround: false, legOffset: 10 };
+        let player = { x: 50, y: 420, width: 30, height: 50, speed: 5, dx: 0, dy: 0, onGround: false, legOffset: 30, legMovement: 0 };
         let keys = {};
         const gravity = 0.5;
         const friction = 0.8;
         let scrollOffset = 0.5;
+        let scrollOffsetY = 0.5;
+
+        // Idle tracking
+        let idleTime = 0;
+        const idleThreshold = 1000; // 1 second in milliseconds
+
+        // Eye variables
+        let eyeOffsetX = 12;
+        let eyeOffsetY = 15;
+        let pupilOffsetX = 0;
+        let pupilOffsetY = 0;
 
         // Level elements
-        const floors = [{ x: 0, y: 550, width: 1600, height: 50 }];
-        const platforms = [{ x: 200, y: 400, width: 100, height: 10 }, { x: 400, y: 300, width: 100, height: 10 }];
-        const obstacles = [{ x: 300, y: 500, width: 50, height: 50 }];
-        const doors = [{ x: 1500, y: 500, width: 50, height: 50, url: 'level2.html' }];
+        const floors = [{ x: 10, y: 550, width: 600, height: 50 }, { x: 200, y: 800, width: 600, height: 50 }, { x: 600, y: 300, width: 600, height: 50 }];
+        const platforms = [
+            { x: 200, y: 400, width: 100, height: 10 },
+            { x: 400, y: 300, width: 100, height: 10 },
+            { x: 800, y: 650, width: 100, height: 10 }
+        ];  //second level
+
+        const obstacles = [{ x: 500, y: 500, width: 50, height: 50 }, { x: 0, y: 100, width: 20, height: 500 }];
+        const doors = [{ x: 1000, y: 200, width: 50, height: 100, url: 'index.html' }];
 
         // Event listeners for key presses
         window.addEventListener('keydown', (e) => {
@@ -42,6 +75,12 @@
         window.addEventListener('keyup', (e) => {
             keys[e.key] = false;
         });
+
+        // Function to update pupil position randomly
+        function updatePupil() {
+            pupilOffsetX = Math.random() * 4 - 2; // Random shift between -2 and 2
+            pupilOffsetY = Math.random() * 4 - 2;
+        }
 
         // Game loop
         function gameLoop() {
@@ -53,58 +92,148 @@
             }
 
             // Move player
+            let moving = false;
             player.dx = 0;
-            if (keys['ArrowRight']) player.dx = player.speed;
-            if (keys['ArrowLeft']) player.dx = -player.speed;
-            if (keys['ArrowUp'] && player.onGround) player.dy = -10;
+            if (keys['ArrowRight']) {
+                player.dx = player.speed;
+                player.legMovement = Math.sin(Date.now() / 40) * 10;
+                moving = true;
+            }
+            if (keys['ArrowLeft']) {
+                player.dx = -player.speed;
+                player.legMovement = Math.sin(Date.now() / 40) * 10;
+                moving = true;
+            }
+            if (keys['ArrowUp'] && player.onGround) player.dy = -13;
+
+            if (!moving) {
+                idleTime += 16.67; // Approximate per frame at ~60fps
+                if (idleTime > idleThreshold) {
+                    // Legs touching the ground
+                    player.legMovement = 0;
+                }
+            } else {
+                idleTime = 0;
+            }
 
             player.x += player.dx;
             player.y += player.dy;
 
+            // Update scrollOffset and scrollOffsetY based on player's position
+            if (player.x > canvas.width / 2) {
+                scrollOffset = player.x - canvas.width / 2;
+            }
+            if (player.y > canvas.height / 2) {
+                scrollOffsetY = player.y - canvas.height / 2;
+            }
+
+            // Update pupil position
+            if (Math.random() < 0.05) { // Approximately once per second
+                updatePupil();
+            }
+
             // Collision detection
             player.onGround = false;
-            floors.concat(platforms).forEach(platform => {
-                if (player.x < platform.x + platform.width &&
+            floors.concat(platforms, obstacles).forEach(platform => {
+                const playerLegY = player.y + player.height + player.legOffset;
+                if (
+                    player.x < platform.x + platform.width &&
                     player.x + player.width > platform.x &&
-                    player.y < platform.y + platform.height &&
-                    player.y + player.height > platform.y) {
+                    playerLegY > platform.y &&
+                    player.y + player.height <= platform.y &&
+                    player.dy >= 0
+                ) {
                     player.dy = 0;
-                    player.y = platform.y - player.height;
+                    player.y = platform.y - player.height - player.legOffset;
                     player.onGround = true;
+                }
+            });
+
+            // Obstacle collision detection (horizontal and vertical)
+            obstacles.forEach(obstacle => {
+                // Vertical collision (landing on top)
+                const playerFeetY = player.y + player.height;
+                if (
+                    player.x < obstacle.x + obstacle.width &&
+                    player.x + player.width > obstacle.x &&
+                    playerFeetY <= obstacle.y &&
+                    playerFeetY + player.dy >= obstacle.y
+                ) {
+                    player.dy = 0;
+                    player.y = obstacle.y - player.height;
+                    player.onGround = true;
+                }
+
+                // Horizontal collision (prevent walking through)
+                if (
+                    player.x < obstacle.x + obstacle.width &&
+                    player.x + player.width > obstacle.x &&
+                    player.y < obstacle.y + obstacle.height &&
+                    player.y + player.height > obstacle.y
+                ) {
+                    if (player.dx > 0) {
+                        player.x = obstacle.x - player.width;
+                    } else if (player.dx < 0) {
+                        player.x = obstacle.x + obstacle.width;
+                    }
+                    player.dx = 0;
                 }
             });
 
             // Draw player with legs
             ctx.fillStyle = 'red';
-            ctx.fillRect(player.x - scrollOffset, player.y, player.width, player.height);
+            ctx.fillRect(player.x - scrollOffset, player.y - scrollOffsetY, player.width, player.height);
             ctx.fillStyle = 'black';
-            ctx.fillRect(player.x - scrollOffset, player.y + player.height, 5, 10);
-            ctx.fillRect(player.x - scrollOffset + player.width - 5, player.y + player.height, 5, 10);
+            ctx.fillRect(player.x - scrollOffset, player.y + player.height - scrollOffsetY, 5, player.legOffset + player.legMovement);
+            ctx.fillRect(player.x - scrollOffset + player.width - 5, player.y + player.height - scrollOffsetY, 5, player.legOffset - player.legMovement);
+
+            // Draw eyes
+            ctx.beginPath();
+            ctx.arc(player.x - scrollOffset + eyeOffsetX, player.y + eyeOffsetY - scrollOffsetY, 10, 0, Math.PI * 2); // White eye
+            ctx.fillStyle = 'white';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(player.x - scrollOffset + pupilOffsetX + eyeOffsetX, player.y + pupilOffsetY + eyeOffsetY - scrollOffsetY, 5, 0, Math.PI * 2); // Black pupil
+            ctx.fillStyle = 'black';
+            ctx.fill();
 
             // Draw floors, platforms, and obstacles
             ctx.fillStyle = 'red';
-            floors.forEach(floor => ctx.fillRect(floor.x - scrollOffset, floor.y, floor.width, floor.height));
+            floors.forEach(floor => ctx.fillRect(floor.x - scrollOffset, floor.y - scrollOffsetY, floor.width, floor.height));
             ctx.fillStyle = 'blue';
-            platforms.forEach(platform => ctx.fillRect(platform.x - scrollOffset, platform.y, platform.width, platform.height));
+            platforms.forEach(platform => ctx.fillRect(platform.x - scrollOffset, platform.y - scrollOffsetY, platform.width, platform.height));
             ctx.fillStyle = 'gray';
-            obstacles.forEach(obstacle => ctx.fillRect(obstacle.x - scrollOffset, obstacle.y, obstacle.width, obstacle.height));
+            obstacles.forEach(obstacle => ctx.fillRect(obstacle.x - scrollOffset, obstacle.y - scrollOffsetY, obstacle.width, obstacle.height));
 
-            // Draw doors
-            ctx.fillStyle = 'brown';
+            // Draw doors with embellishments and labels
             doors.forEach(door => {
-                ctx.fillRect(door.x - scrollOffset, door.y, door.width, door.height);
-                if (player.x < door.x + door.width &&
+                // Draw door
+                ctx.fillStyle = 'brown';
+                ctx.fillRect(door.x - scrollOffset, door.y - scrollOffsetY, door.width, door.height);
+
+                // Draw frame around door
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(door.x - scrollOffset, door.y - scrollOffsetY, door.width, door.height);
+
+                // Add label above door
+                ctx.fillStyle = 'black';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Level 2', door.x - scrollOffset + door.width / 2, door.y - 10 - scrollOffsetY);
+
+                // Handle door collision
+                if (
+                    player.x < door.x + door.width &&
                     player.x + player.width > door.x &&
                     player.y < door.y + door.height &&
-                    player.y + player.height > door.y) {
+                    player.y + player.height > door.y
+                ) {
                     window.location.href = door.url;
                 }
             });
-
             // Scroll the display
-            if (player.x > canvas.width / 2) {
-                scrollOffset = player.x - canvas.width / 2;
-            }
+            // Already handled above with scrollOffset and scrollOffsetY
 
             requestAnimationFrame(gameLoop);
         }
